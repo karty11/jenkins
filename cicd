@@ -1,0 +1,101 @@
+pipeline {
+    agent any
+    tools{
+        nodejs 'nodejs23'
+       }
+    environment{
+        SCANNER_HOME = tool 'sonar-scanner'
+       }
+    stages {
+        stage('Git checkout') {
+            steps {
+                git branch: 'deploy-to-dev-k8', url: 'https://github.com/karty11/jenkins.git'
+            }
+        }
+        stage('Frontend compilation') {
+            steps {
+                 dir('client') {
+                    sh 'find . -name "*.js" -exec node --check {} +'
+                }
+            }
+        }
+        stage('Backend compilation') {
+            steps {
+                 dir('api') {
+                    sh 'find . -name "*.js" -exec node --check {} +'
+                }
+            }
+        }
+        stage('Gitleaks scan') {
+            steps {
+                sh 'gitleaks detect --source ./client --exit-code 1'
+                sh 'gitleaks detect --source ./api --exit-code 1'
+            }
+        }
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonar') {
+                       sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=NodeJS-Project \
+                       -Dsonar.projectKey=NodeJS-Project'''
+               }
+            }
+        }
+        stage('Quality Gate') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                     waitForQualityGate abortPipeline: false, credentialsId: 'sonar-token'
+                }
+            }
+        }
+        stage('Trivy Fs scan') {
+            steps {
+                sh 'trivy fs --format table -o fs-report.html .'
+            }
+        }
+        stage('Build Tag & Push Backend Docker Image') {
+            steps {
+                script{
+                    withDockerRegistry(credentialsId: 'dockerhub') {
+                        dir('api') {
+                            sh 'docker build -t karty11/backend:latest .'
+                            sh 'trivy image --format table -o backend-image-report.html karty11/backend:latest '
+                            sh 'docker push karty11/backend:latest'
+                    }
+                  }
+                }
+            }
+        }
+        stage('Build Tag & Push frontend Docker Image') {
+            steps {
+                script{
+                    withDockerRegistry(credentialsId: 'dockerhub') {
+                        dir('client') {
+                            sh 'docker build -t karty11/frontend:latest .'
+                            sh 'trivy image --format table -o frontend-image-report.html karty11/frontend:latest '
+                            sh 'docker push karty11/frontend:latest'
+                    }
+                  }
+                }
+             }
+         }
+       stage('k8-deploy') {
+            steps {
+                script{
+                     sh 'kubectl apply -f k8s/sc.yaml -n dev'   
+                     sh 'kubectl apply -f k8s/mysql.yaml -n dev'  
+                     sh 'kubectl apply -f k8s/backend.yaml -n dev'
+                     sh 'kubectl apply -f k8s/frontend.yaml -n dev'
+                     sleep 30
+                 }
+            }
+        }
+        stage('k8-check') {
+            steps {
+                script{
+                     sh 'kubectl get pods -n dev'   
+                     sh 'kubectl get svc -n dev'
+                 }
+            }
+         }
+        }
+    }
