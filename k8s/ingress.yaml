@@ -48,4 +48,4 @@ spec:
     - hosts:
         - kartytechtechonline.online
         - www.kartytechtechonline.online
-      secretName: adityajaiswal-co-tls
+      secretName: kartytechtechonline-tls
