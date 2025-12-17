@@ -78,6 +78,15 @@ pipeline {
                 }
              }
          }
+
+      stage('Manual Approval for Production') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    input message: 'Approve deployment to PRODUCTION?', ok: 'Deploy'
+                }
+            }
+        }
+
        stage('k8-deploy') {
             steps {
                 script{
@@ -89,13 +98,19 @@ pipeline {
                  }
             }
         }
-        stage('k8-check') {
+}
+       stage('Verify Deployment To Prod') {
             steps {
-                script{
-                     sh 'kubectl get pods -n dev'   
-                     sh 'kubectl get svc -n dev'
-                 }
+                script {
+                    withKubeConfig(caCertificate: '', clusterName: 'devopsshack-cluster', contextName: '', credentialsId: 'k8-prod-token', namespace: 'prod', restrictKubeConfigAccess: false, serverUrl: 'https://AFC6FCFF5360B30D5E8950396E38A8C4.gr7.ap-south-1.eks.amazonaws.com') {
+                        sh 'kubectl get pods -n prod'
+                        sleep 20
+                         sh 'kubectl get ingress -n prod'
+                        
+                    }
+                }
             }
-         }
         }
+            
     }
+}
